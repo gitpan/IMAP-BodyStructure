@@ -1,0 +1,13 @@
+Revision history for Perl extension IMAP::BodyStructure.
+
+0.81 Tue,  7 July 2004 15:40 (MSD)
+	- Clarify message/rfc822 and hierarchy issue.
+
+0.8  Tue,  6 July 2004 18:52:55 (MSD)
+	- Getting ready to release to public.
+	High version means it's almose feature-complete.
+
+0.5  Tue Jun  8 13:49:39 2004
+	- original version; created by h2xs 1.21 with options
+		-XA -n IMAP::BodyStructure -b 5.5.0
+
