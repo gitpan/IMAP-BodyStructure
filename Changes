@@ -1,5 +1,14 @@
 Revision history for Perl extension IMAP::BodyStructure.
 
+0.9  Mon, 19 July 2004 18:05 (MSD)
+	- Propagate class from constructor into nested parts
+	both for structures and envelopes.
+
+	- Changed the way nested message/rfc822 affect hierarchy.
+	We are now compatible with IMAP FETCH BODY[...] command.
+
+	- Wrote a README.
+
 0.81 Tue,  7 July 2004 15:40 (MSD)
 	- Clarify message/rfc822 and hierarchy issue.
 

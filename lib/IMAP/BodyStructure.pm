@@ -2,7 +2,7 @@ package IMAP::BodyStructure;
 use strict;
 
 # $from-Id: BodyStructure.pm,v 1.23 2004/07/06 13:53:24 kappa Exp $
-# $Id: BodyStructure.pm,v 1.6 2004/07/07 11:44:15 kappa Exp $
+# $Id: BodyStructure.pm,v 1.8 2004/07/19 14:16:07 kappa Exp $
 
 =head1 NAME
 
@@ -55,10 +55,10 @@ use 5.005;
 
 use vars qw/$VERSION/;
 
-$VERSION = '0.81';
+$VERSION = '0.9';
 
-sub get_envelope(\$);
-sub _get_bodystructure(\$;$);
+sub _get_envelope($\$);
+sub _get_bodystructure(\$;$$);
 sub _get_npairs(\$);
 sub _get_ndisp(\$);
 sub _get_nstring(\$);
@@ -87,7 +87,7 @@ sub new {
     my $imap_bs = shift;
     my $bs;
 
-    $bs = _get_bodystructure($imap_bs);
+    $bs = _get_bodystructure($imap_bs, $class);
     $bs->{part_id} ||= 1;   # single-part has one part with id 1
 
     bless $bs, $class;
@@ -212,27 +212,38 @@ sub parts {
 
 This method returns a message part by its path. A path to a part in
 the hierarchy is a dot-separated string of part indices. See L</SYNOPSIS> for
-an example. A nested C<message/rfc822> always has exactly one nested
-part which represents the internal IMAP::BodyStructure object. Look,
-here is an outline of an example message structure with part paths alongside
-each part.
+an example. A nested C<message/rfc822> does not add a hierarchy level
+UNLESS it is a single part of another C<message/rfc822> part (with no
+C<multipart/*> levels in between).  Instead, it has an additinal
+C<.TEXT> part which refers to the internal IMAP::BodyStructure object.
+Look, here is an outline of an example message structure with part
+paths alongside each part.
 
     multipart/mixed                   1
         text/plain                    1.1
         application/msword            1.2
         message/rfc822                1.3
-            multipart/alternative     1.3.1
-                text/plain            1.3.1.1
-                multipart/related     1.3.1.2
-                    text/html         1.3.1.2.1
-                    image/png         1.3.1.2.2
-                    image/png         1.3.1.2.3
+            multipart/alternative     1.3.TEXT
+                text/plain            1.3.1
+                multipart/related     1.3.2
+                    text/html         1.3.2.1
+                    image/png         1.3.2.2
+                    image/png         1.3.2.3
 
 This is a text email with two attachments, one being a word document,
 and the other is itself a message (probably a forward) which is composed in a
 graphical MUA and contains two alternative representations, one
 plain text fallback and one HTML with images (bundled as a
 C<multipart/related>).
+
+Another one with several levels of C<message/rfc822>. This one is hard
+to compose in a modern MUA, however.
+
+    multipart/mixed                   1
+        text/plain                    1.1
+        message/rfc822                1.2
+            message/rfc822            1.2.TEXT
+                text/plain            1.2.1
 
 =cut
 
@@ -253,9 +264,9 @@ sub _part_at {
     if ($self->type =~ /^multipart\//) {
         return $self->{parts}->[$part_num - 1]->_part_at(@parts);
     } elsif ($self->type eq 'message/rfc822') {
-        warn "part_at trying to get $part_num part of a message/rfc822\n"
-            unless $part_num == 1;
-        return $self->{bodystructure}->_part_at(@parts);
+        return $self->{bodystructure} if $part_num eq 'TEXT';
+
+        return $self->{bodystructure}->_part_at($part_num, @parts);
     } else {
         return $self;
     }
@@ -309,14 +320,17 @@ sub part_path {
     return $self->{part_id};
 }
 
-sub get_envelope(\$) {
-    IMAP::BodyStructure::Envelope->new($_[0]);
+sub _get_envelope($\$) {
+    eval "$_[0]::Envelope->new(\$_[1])";
 }
 
-sub _get_bodystructure(\$;$) {
+sub _get_bodystructure(\$;$$) {
     my $str = shift;
+    my $class = shift || __PACKAGE__;
     my $id  = shift;
     my %bs = ( part_id => $id );
+
+    my $id_prefix = $id ? "$id." : '';
 
     $$str =~ m/\G\s*(?:\(BODYSTRUCTURE)?\s*\(/gc
         or return 0;
@@ -326,7 +340,8 @@ sub _get_bodystructure(\$;$) {
         $bs{type}       = 'multipart/';
         $bs{parts}      = [];
         my $part_id = 1;
-        while (my $part_bs = _get_bodystructure($$str, ($id ? "$id." : '') . $part_id++)) {
+        $id_prefix =~ s/\.?TEXT//;
+        while (my $part_bs = _get_bodystructure($$str, $class, $id_prefix . $part_id++)) {
             push @{$bs{parts}}, $part_bs;
         }
 
@@ -344,8 +359,12 @@ sub _get_bodystructure(\$;$) {
         $bs{size}       = _get_nstring($$str);
 
         if ($bs{type} eq 'message/rfc822') {
-            $bs{envelope}       = get_envelope($$str);
-            $bs{bodystructure}  = _get_bodystructure($$str, ($id ? "$id." : '') . 1);
+            $bs{envelope}       = _get_envelope($class, $$str);
+            if ($id_prefix =~ s/\.?TEXT//) {
+                $bs{bodystructure}  = _get_bodystructure($$str, $class, $id_prefix . '1');
+            } else {
+                $bs{bodystructure}  = _get_bodystructure($$str, $class, $id_prefix . 'TEXT');
+            }
             $bs{textlines}      = _get_nstring($$str);
         } elsif ($bs{type}      =~ /^text\//) {
             $bs{textlines}      = _get_nstring($$str);
@@ -359,7 +378,7 @@ sub _get_bodystructure(\$;$) {
 
     $$str =~ m/\G\s*\)/gc;
 
-    return bless \%bs, __PACKAGE__;
+    return bless \%bs, $class;
 }
 
 sub _get_ndisp(\$) {

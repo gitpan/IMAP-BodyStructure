@@ -3,7 +3,7 @@ use strict;
 
 # $from-Id: FI-bodystructure.t,v 1.8 2004/07/06 13:53:26 kappa Exp $
 
-use Test::More tests => 81;
+use Test::More tests => 96;
 
 BEGIN { use_ok('IMAP::BodyStructure'); }
 
@@ -75,8 +75,15 @@ is($bs->{parts}->[4]->{bodystructure}->{encoding}, 'quoted-printable', 'QP body 
 ok($bs = IMAP::BodyStructure->new('(("text" "plain" ("charset" "KOI8-R") NIL NIL "8bit" 41 4 NIL ("inline" NIL) NIL)("message" "rfc822" NIL NIL NIL "8bit" 7140 (NIL "A postcard for you" (("Mail Delivery System" NIL "MAILER-DAEMON" "capella.rambler.ru")) (("Mail Delivery System" NIL "MAILER-DAEMON" "capella.rambler.ru")) (("Mail Delivery System" NIL "MAILER-DAEMON" "capella.rambler.ru")) ((NIL NIL "noone" "")) NIL NIL NIL NIL) (("text" "plain" NIL NIL NIL "binary" 91 3 NIL ("inline" NIL) NIL)(("text" "html" NIL NIL NIL "binary" 126 3 NIL ("inline" NIL) NIL)("image" "jpeg" ("name" "bluedot.jpg") "my-graphic" NIL "base64" 5886 NIL ("inline" ("filename" "bluedot.jpg")) NIL) "related" ("boundary" "----------=_961872013-1436-1") NIL NIL) "alternative" ("boundary" "----------=_961872013-1436-0") NIL NIL) 139 NIL ("inline" NIL) NIL) "mixed" ("boundary" "SUOF0GtieIMvvwua") ("inline" NIL) NIL)'), 'multipart with real nested message parse');
 
 is($bs->{parts}->[1]->{part_id}, '2', 'message/rfc822 part part_id');
-is($bs->{parts}->[1]->{bodystructure}->{part_id}, '2.1', 'message/rfc822 bodystructure part_id');
-is($bs->{parts}->[1]->{bodystructure}->{parts}->[0]->{part_id}, '2.1.1', 'message/rfc822 nested part_id');
+is($bs->{parts}->[1]->type, 'message/rfc822', 'message/rfc822 part type');
+is($bs->{parts}->[1]->{bodystructure}->{part_id}, '2.TEXT', 'message/rfc822 bodystructure part_id');
+is($bs->{parts}->[1]->{bodystructure}->type, 'multipart/alternative', 'message/rfc822 bodystructure type');
+is($bs->{parts}->[1]->{bodystructure}->{parts}->[0]->{part_id}, '2.1', 'message/rfc822 nested part_id');
+is($bs->{parts}->[1]->{bodystructure}->{parts}->[0]->type, 'text/plain', 'message/rfc822 nested type 1');
+is($bs->{parts}->[1]->{bodystructure}->{parts}->[1]->{part_id}, '2.2', 'nested part_id 2');
+is($bs->{parts}->[1]->{bodystructure}->{parts}->[1]->type, 'multipart/related', 'message/rfc822 nested type 2');
+is($bs->{parts}->[1]->{bodystructure}->{parts}->[1]->{parts}->[0]->{part_id}, '2.2.1', 'nested nested part_id');
+is($bs->{parts}->[1]->{bodystructure}->{parts}->[1]->{parts}->[0]->type, 'text/html', 'nested nested part type');
 
 is($bs->{parts}->[1]->{type}, 'message/rfc822', 'message inside indeed');
 is($bs->{parts}->[1]->{envelope}->{from}->[0]->{full}, 'Mail Delivery System <MAILER-DAEMON@capella.rambler.ru>', 'full from address');
@@ -99,8 +106,23 @@ ok($bs = IMAP::BodyStructure->new('(("text" "plain" ("charset" "KOI8-R") NIL NIL
 
 is($bs->parts(0), $bs->part_at('1'), 'part_path 2');
 is($bs->parts(1), $bs->part_at('2'), 'part_path 2 1/2');
-is($bs->parts(1)->{bodystructure}, $bs->part_at('2.1'), 'part_path 3 - 1/4');
-is($bs->parts(1)->{bodystructure}->parts(0), $bs->part_at('2.1.1'), 'part_path 3');
+is($bs->parts(1)->{bodystructure}, $bs->part_at('2.TEXT'), 'part_path 3 - 1/4');
+is($bs->parts(1)->{bodystructure}->parts(0), $bs->part_at('2.1'), 'part_path 3');
+
+ok($bs = IMAP::BodyStructure->new('(("text" "plain" ("charset" "KOI8-R") NIL NIL "8bit" 41 4 NIL ("inline" NIL) NIL)("message" "rfc822" NIL NIL NIL "8bit" 7140 (NIL "A postcard for you" (("Mail Delivery System" NIL "MAILER-DAEMON" "capella.rambler.ru")) (("Mail Delivery System" NIL "MAILER-DAEMON" "capella.rambler.ru")) (("Mail Delivery System" NIL "MAILER-DAEMON" "capella.rambler.ru")) ((NIL NIL "noone" "")) NIL NIL NIL NIL) ("message" "rfc822" ("name" "nice.name") NIL NIL "8bit" 269 (NIL "Part 5 of the outer message is itself an RFC822 message!" NIL NIL NIL NIL NIL NIL NIL NIL) ("text" "plain" ("charset" "ISO-8859-1") NIL NIL "quoted-printable" 58 1 NIL NIL NIL) 8 NIL NIL NIL) 139 NIL ("inline" NIL) NIL) "mixed" ("boundary" "SUOF0GtieIMvvwua") ("inline" NIL) NIL)'), 'm/r inside single-part m/r (extra artificial hierarchy level)');
+
+is($bs->{parts}->[1]->{part_id}, '2', 'obvious');
+is($bs->{parts}->[1]->{type}, 'message/rfc822', 'm/r type');
+is($bs->{parts}->[1]->{bodystructure}->{part_id}, '2.TEXT', 'm/r bs part_id');
+is($bs->{parts}->[1]->{bodystructure}->{type}, 'message/rfc822',
+    'm/r inside m/r type');
+is($bs->{parts}->[1]->{bodystructure}->{bodystructure}->{part_id}, '2.1',
+    'm/r inside m/r part_id');
+is($bs->{parts}->[1]->{bodystructure}->{bodystructure}->{type}, 'text/plain',
+    'm/r inside m/r type');
+is($bs->{parts}->[1]->{bodystructure}->{bodystructure},
+    $bs->part_at('2.1'), 'part_at on m/r inside m/r');
+
 
 ok($bs = IMAP::BodyStructure->new(qq|(("text" "plain" ("charset" "KOI8-R") NIL NIL "8bit" 265 7 NIL NIL NIL)("application" "msword" ("name" {16}\r\nНа мне штаны.doc) NIL NIL "base64" 30130 NIL ("attachment" ("filename" {16}\r\nНа мне штаны.doc)) NIL) "mixed" ("boundary" "----yhZZhMGe-nrBcxM6r3syK6tCK:1045583399") NIL NIL)|), 'parse body with unencoded literal filenames');
 is($bs->parts(1)->filename, 'На мне штаны.doc', 'filename');
