@@ -1,15 +1,17 @@
 --- #YAML:1.0
 name: IMAP-BodyStructure
-version: 0.9
+version: 0.91
 author:
   - Alex Kapranoff, E<lt>kappa@rambler-co.ruE<gt>
 abstract: IMAP4-compatible BODYSTRUCTURE and ENVELOPE parser
 license: artistic
+build_requires:
+  Test::NoWarnings: 0
 provides:
   IMAP::BodyStructure:
     file: lib/IMAP/BodyStructure.pm
-    version: 0.9
+    version: 0.91
   IMAP::BodyStructure::Envelope:
     file: lib/IMAP/BodyStructure.pm
-    version: 0.9
-generated_by: Module::Build version 0.25_01
+    version: 0.91
+generated_by: Module::Build version 0.25_02

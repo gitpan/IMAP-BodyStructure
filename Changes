@@ -1,5 +1,13 @@
 Revision history for Perl extension IMAP::BodyStructure.
 
+0.91  Mon, 6 September 2004 18:15 (MSD)
+	- use Test::NoWarnings in test.pl.
+	
+	- Do not choke on literal of more than 32766 chars (/.{}/ limit).
+
+	- Do not default disposition to anything. Sometimes this leads
+	to information loss. Clarify docs on the issue.
+
 0.9  Mon, 19 July 2004 18:05 (MSD)
 	- Propagate class from constructor into nested parts
 	both for structures and envelopes.

@@ -3,7 +3,8 @@ use strict;
 
 # $from-Id: FI-bodystructure.t,v 1.8 2004/07/06 13:53:26 kappa Exp $
 
-use Test::More tests => 96;
+use Test::NoWarnings;
+use Test::More tests => 99;
 
 BEGIN { use_ok('IMAP::BodyStructure'); }
 
@@ -15,11 +16,12 @@ my %nstrings = (
     ' "a \"bb\" a" '=> ['a "bb" a', 13],
     "{4}\r\nLNIL"=> ['LNIL', 9],
     'AA'	=> ['AA', 2],
+    "{33000}\r\n" . ('@' x 33000) => ['@' x 33000, 33000 + 9],
 );
 
 while (my ($nstr, $data) = each (%nstrings)) {
-    is(IMAP::BodyStructure::_get_nstring($nstr), $data->[0], "nstring [" . ($data->[0] || '<undef>') . ']');
-    is(pos($nstr), $data->[1], "pos for [" . ($data->[0] || '<undef>') . ']');
+    is(IMAP::BodyStructure::_get_nstring($nstr), $data->[0], "nstring [" . (substr($data->[0] || '', 0, 20) || '<undef>') . ']');
+    is(pos($nstr), $data->[1], "pos for [" . (substr($data->[0] || '', 0, 20) || '<undef>') . ']');
 }
 
 ok(my $bs = IMAP::BodyStructure->new('("text" "plain" NIL NIL NIL "8bit" 41 5 NIL NIL NIL)'),

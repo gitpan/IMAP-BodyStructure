@@ -2,7 +2,7 @@ package IMAP::BodyStructure;
 use strict;
 
 # $from-Id: BodyStructure.pm,v 1.23 2004/07/06 13:53:24 kappa Exp $
-# $Id: BodyStructure.pm,v 1.8 2004/07/19 14:16:07 kappa Exp $
+# $Id: BodyStructure.pm,v 1.9 2004/09/06 14:18:23 kappa Exp $
 
 =head1 NAME
 
@@ -55,7 +55,7 @@ use 5.005;
 
 use vars qw/$VERSION/;
 
-$VERSION = '0.9';
+$VERSION = '0.91';
 
 sub _get_envelope($\$);
 sub _get_bodystructure(\$;$$);
@@ -123,14 +123,16 @@ EOC
 =item disp()
 
 Returns the content-disposition of the part. One of 'inline' or
-'attachment'. Use case-insensitive comparisons.
+'attachment', usually. Defaults to inline, but you should remember
+that if there IS a disposition but you cannot recognize it than act as
+if it's 'attachment'. And use case-insensitive comparisons.
 
 =cut
 
 sub disp {
     my $self = shift;
 
-    return $self->{disp}->[0];
+    return $self->{disp} ? $self->{disp}->[0] : 'inline';
 }
 
 =item charset()
@@ -262,6 +264,7 @@ sub _part_at {
         or return $self;
 
     if ($self->type =~ /^multipart\//) {
+        # XXX assert: $part_num is a num
         return $self->{parts}->[$part_num - 1]->_part_at(@parts);
     } elsif ($self->type eq 'message/rfc822') {
         return $self->{bodystructure} if $part_num eq 'TEXT';
@@ -446,8 +449,10 @@ sub _get_nstring(\$) {
     } elsif ($$str =~ m/\G(\"(?:\\\"|(?!\").)*\")/gc) { # delimited re ala Friedl
         return _unescape($1);
     } elsif ($$str =~ /\G\{(\d+)\}\r\n/gc) {
-        $$str =~ /\G(.{$1})/gcs;
-        return $1;
+        my $pos = pos($$str);
+        my $data = substr $$str, $pos, $1;
+        pos($$str) = $pos + $1;
+        return $data;
     } elsif ($$str =~ /\G([^"\(\)\{ \%\*\"\\\x00-\x1F]+)/gc) {
         return $1;
     }
