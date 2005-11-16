@@ -4,7 +4,7 @@ use strict;
 # $from-Id: FI-bodystructure.t,v 1.8 2004/07/06 13:53:26 kappa Exp $
 
 use Test::NoWarnings;
-use Test::More tests => 99;
+use Test::More tests => 100;
 
 BEGIN { use_ok('IMAP::BodyStructure'); }
 
@@ -67,6 +67,8 @@ is($bs->{parts}->[2]->{encoding}, 'base64', 'multipart[2] encoding');
 is($bs->{parts}->[3]->{type}, 'image/png', 'multipart[3] type');
 ok(!exists $bs->{parts}->[3]->{textlines}, 'multipart[3] does not have textlines');
 is($bs->{parts}->[1]->{part_id}, '2', 'part_id of a second part');
+
+is(scalar @{$bs->{parts}->[0]->{parts}}, 0, 'singlepart contains 0 parts');
 
 ok($bs = IMAP::BodyStructure->new('(("text" "plain" NIL NIL NIL "8bit" 213 5 NIL NIL NIL)("text" "plain" ("charset" "us-ascii") NIL NIL "8bit" 144 4 NIL NIL NIL)(("image" "gif" ("name" "3d-vise.gif") NIL NIL "base64" 574 NIL ("inline" ("filename" "3d-vise.gif")) NIL)("image" "gif" ("name" "3d-eye.gif") NIL NIL "base64" 568 NIL ("inline" ("filename" "3d-eye.gif")) NIL) "parallel" ("boundary" "unique-boundary-2") NIL NIL)("text" "richtext" NIL NIL NIL "8bit" 152 4 NIL NIL NIL)("message" "rfc822" ("name" "nice.name") NIL NIL "8bit" 275 (NIL "Part 5 of the outer message is itself an RFC822 message!" NIL NIL NIL NIL NIL NIL NIL NIL) ("text" "plain" ("charset" "ISO-8859-1") NIL NIL "quoted-printable" 58 1 NIL NIL NIL) 8 NIL NIL NIL) "mixed" ("boundary" "unique-boundary-1") NIL NIL)'), 'multipart 2 parse');
 is($bs->{parts}->[2]->{type}, 'multipart/parallel', 'nested multipart type');

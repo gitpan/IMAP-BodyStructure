@@ -2,7 +2,7 @@ package IMAP::BodyStructure;
 use strict;
 
 # $from-Id: BodyStructure.pm,v 1.23 2004/07/06 13:53:24 kappa Exp $
-# $Id: BodyStructure.pm,v 1.9 2004/09/06 14:18:23 kappa Exp $
+# $Id: BodyStructure.pm,v 1.11 2005/11/16 14:21:06 kappa Exp $
 
 =head1 NAME
 
@@ -31,20 +31,20 @@ IMAP::BodyStructure - IMAP4-compatible BODYSTRUCTURE and ENVELOPE parser
 
 An IMAP4-compatible IMAP server MUST include a full MIME-parser which
 parses the messages inside IMAP mailboxes and is accessible via
-BODYSTRUCTURE fetch item. This module provides a perl interface to
+BODYSTRUCTURE fetch item. This module provides a Perl interface to
 parse the output of IMAP4 MIME-parser. Hope no one will have problems
 with parsing this doc.
 
 It is a rather straightforward C<m/\G.../gc>-style parser and is
 therefore much, much faster then the venerable L<Mail::IMAPClient::BodyStructure>
-which is based on a L<Parse::RecDescent> grammar. I believe it also to be
+which is based on a L<Parse::RecDescent> grammar. I believe it is also
 more correct when parsing nested multipart C<message/rfc822> parts. See
 testsuite if interested.
 
 I'd also like to emphasize that I<this module does not contain IMAP4
 client!> You will need to employ one from CPAN, there are many. A
 section with examples of getting to a BODYSTRUCTURE fetch item with
-various Perl IMAP clients available on CPAN will of course greatly
+various Perl IMAP clients available on CPAN would greatly
 enhance this document.
 
 =head1 INTERFACE
@@ -55,7 +55,7 @@ use 5.005;
 
 use vars qw/$VERSION/;
 
-$VERSION = '0.91';
+$VERSION = '0.96';
 
 sub _get_envelope($\$);
 sub _get_bodystructure(\$;$$);
@@ -80,17 +80,15 @@ implementation of the Composite Design Pattern.
 
 =cut
 
+use fields qw/type encoding size disp params parts desc bodystructure
+    part_id cid textlines md5 lang loc envelope/;
+
 sub new {
     my $class   = shift;
-    $class      = ref $class if ref $class;
+    $class      = ref $class || $class;
+    my $imap_str= shift;
 
-    my $imap_bs = shift;
-    my $bs;
-
-    $bs = _get_bodystructure($imap_bs, $class);
-    $bs->{part_id} ||= 1;   # single-part has one part with id 1
-
-    bless $bs, $class;
+    return _get_bodystructure($imap_str, $class);
 }
 
 =item type()
@@ -113,11 +111,8 @@ data.
 =cut
 
 for my $field (qw/type encoding size/) {
-    eval <<"EOC"
-sub $field {
-    return \$_[0]->{$field};
-}
-EOC
+    no strict 'refs';
+    *$field = sub { return $_[0]->{$field} };
 }
 
 =item disp()
@@ -216,7 +211,7 @@ This method returns a message part by its path. A path to a part in
 the hierarchy is a dot-separated string of part indices. See L</SYNOPSIS> for
 an example. A nested C<message/rfc822> does not add a hierarchy level
 UNLESS it is a single part of another C<message/rfc822> part (with no
-C<multipart/*> levels in between).  Instead, it has an additinal
+C<multipart/*> levels in between).  Instead, it has an additional
 C<.TEXT> part which refers to the internal IMAP::BodyStructure object.
 Look, here is an outline of an example message structure with part
 paths alongside each part.
@@ -232,7 +227,7 @@ paths alongside each part.
                     image/png         1.3.2.2
                     image/png         1.3.2.3
 
-This is a text email with two attachments, one being a word document,
+This is a text email with two attachments, one being an MS Word document,
 and the other is itself a message (probably a forward) which is composed in a
 graphical MUA and contains two alternative representations, one
 plain text fallback and one HTML with images (bundled as a
@@ -328,60 +323,63 @@ sub _get_envelope($\$) {
 }
 
 sub _get_bodystructure(\$;$$) {
-    my $str = shift;
-    my $class = shift || __PACKAGE__;
-    my $id  = shift;
-    my %bs = ( part_id => $id );
+    my $str     = shift;
+    my $class   = shift || __PACKAGE__;
+    my $id      = shift;
+
+    my __PACKAGE__ $bs = fields::new($class);
+    $bs->{part_id} = $id || 1;  # !defined $id --> top-level message
+                                # and single-part has one part with part_id 1
 
     my $id_prefix = $id ? "$id." : '';
 
     $$str =~ m/\G\s*(?:\(BODYSTRUCTURE)?\s*\(/gc
         or return 0;
 
+    $bs->{parts}      = [];
     if ($$str =~ /(?=\()\G/gc) {
         # multipart
-        $bs{type}       = 'multipart/';
-        $bs{parts}      = [];
+        $bs->{type}       = 'multipart/';
         my $part_id = 1;
         $id_prefix =~ s/\.?TEXT//;
         while (my $part_bs = _get_bodystructure($$str, $class, $id_prefix . $part_id++)) {
-            push @{$bs{parts}}, $part_bs;
+            push @{$bs->{parts}}, $part_bs;
         }
 
-        $bs{type}      .= lc(_get_nstring($$str));
-        $bs{params}     = _get_npairs($$str);
-        $bs{disp}       = _get_ndisp($$str);
-        $bs{lang}       = _get_nstring($$str);
-        $bs{loc}        = _get_nstring($$str);
+        $bs->{type}      .= lc(_get_nstring($$str));
+        $bs->{params}     = _get_npairs($$str);
+        $bs->{disp}       = _get_ndisp($$str);
+        $bs->{lang}       = _get_nstring($$str);
+        $bs->{loc}        = _get_nstring($$str);
     } else {
-        $bs{type}       = lc (_get_nstring($$str) . '/' . _get_nstring($$str));
-        $bs{params}     = _get_npairs($$str);
-        $bs{cid}        = _get_nstring($$str);
-        $bs{desc}       = _get_nstring($$str);
-        $bs{encoding}   = _get_nstring($$str);
-        $bs{size}       = _get_nstring($$str);
+        $bs->{type}       = lc (_get_nstring($$str) . '/' . _get_nstring($$str));
+        $bs->{params}     = _get_npairs($$str);
+        $bs->{cid}        = _get_nstring($$str);
+        $bs->{desc}       = _get_nstring($$str);
+        $bs->{encoding}   = _get_nstring($$str);
+        $bs->{size}       = _get_nstring($$str);
 
-        if ($bs{type} eq 'message/rfc822') {
-            $bs{envelope}       = _get_envelope($class, $$str);
+        if ($bs->{type} eq 'message/rfc822') {
+            $bs->{envelope}       = _get_envelope($class, $$str);
             if ($id_prefix =~ s/\.?TEXT//) {
-                $bs{bodystructure}  = _get_bodystructure($$str, $class, $id_prefix . '1');
+                $bs->{bodystructure}  = _get_bodystructure($$str, $class, $id_prefix . '1');
             } else {
-                $bs{bodystructure}  = _get_bodystructure($$str, $class, $id_prefix . 'TEXT');
+                $bs->{bodystructure}  = _get_bodystructure($$str, $class, $id_prefix . 'TEXT');
             }
-            $bs{textlines}      = _get_nstring($$str);
-        } elsif ($bs{type}      =~ /^text\//) {
-            $bs{textlines}      = _get_nstring($$str);
+            $bs->{textlines}      = _get_nstring($$str);
+        } elsif ($bs->{type}      =~ /^text\//) {
+            $bs->{textlines}      = _get_nstring($$str);
         }
 
-        $bs{md5}  = _get_nstring($$str);
-        $bs{disp} = _get_ndisp($$str);
-        $bs{lang} = _get_nstring($$str);
-        $bs{loc}  = _get_nstring($$str);
+        $bs->{md5}  = _get_nstring($$str);
+        $bs->{disp} = _get_ndisp($$str);
+        $bs->{lang} = _get_nstring($$str);
+        $bs->{loc}  = _get_nstring($$str);
     }
 
     $$str =~ m/\G\s*\)/gc;
 
-    return bless \%bs, $class;
+    return $bs;
 }
 
 sub _get_ndisp(\$) {
@@ -504,7 +502,7 @@ sub _get_naddrlist(\$);
 sub _get_naddress(\$);
 
 use vars qw/@envelope_addrs/;
-@envelope_addrs = qw/from sender reply-to to cc bcc/;
+@envelope_addrs = qw/from sender reply_to to cc bcc/;
 
 =head2 METHODS
 
@@ -531,14 +529,14 @@ INTERNALDATE, be careful!
 
 Subject of the message, may be RFC2047 encoded, of course.
 
-=item mesage_id
+=item message_id
 
-=item in-reply-to
+=item in_reply_to
 
 Message-IDs of the current message and the message in reply to which
 this one was composed.
 
-=item to, from, cc, bcc, sender, reply-to
+=item to, from, cc, bcc, sender, reply_to
 
 These are the so called address-lists or just arrays of addresses.
 Remember, a message may be addressed to lots of people.
@@ -549,7 +547,7 @@ Each address is a hash of four elements:
 
 =item name
 
-The informal part, "A.U.Thor" from "A.U.Thor, E<lt>a.u.thor@somewhere.comE<gt>
+The informal part, "A.U.Thor" from "A.U.Thor, E<lt>a.u.thor@somewhere.comE<gt>"
 
 =item sroute
 
@@ -574,6 +572,8 @@ The full address for display purposes.
 
 =cut
 
+use fields qw/from sender reply_to to cc bcc date subject in_reply_to message_id/;
+
 sub new(\$) {
     my $class = shift;
     my $str = shift;
@@ -581,7 +581,7 @@ sub new(\$) {
     $$str =~ m/\G\s*(?:\(ENVELOPE)?\s*\(/gc
         or return 0;
 
-    my $self = {};
+    my __PACKAGE__ $self = fields::new($class);
 
     $self->{'date'}     = _get_nstring($$str);
     $self->{'subject'}  = _get_nstring($$str);
@@ -590,12 +590,12 @@ sub new(\$) {
         $self->{$header} = _get_naddrlist($$str);
     }
 
-    $self->{'in-reply-to'}  = _get_nstring($$str);
+    $self->{'in_reply_to'}  = _get_nstring($$str);
     $self->{'message_id'}   = _get_nstring($$str);
 
     $$str =~ m/\G\s*\)/gc;
 
-    return bless $self, $class;
+    return $self;
 }
 
 sub _get_naddress(\$) {
