@@ -1,5 +1,17 @@
 Revision history for Perl extension IMAP::BodyStructure.
 
+1.01
+	- INCOMPATIBLE CHANGE:
+		->part_at() with wrong part path now returns undef
+		instead of automatically climbing up the tree.
+
+	- be more smart (follow RFC) when filling {*_full} members
+		of envelope addresses
+	- defined but empty (or 0) disposition should mean `inline'
+	- speed up several busy regexen by a factor of 2-5.
+	- ->charset will never return mysterious '' or '0' instead
+	  of `undef'.
+
 0.96  2005/11/16
 	- ->{parts} for singlepart messages is now a '[]'.
 

@@ -4,19 +4,22 @@ use strict;
 # $from-Id: FI-bodystructure.t,v 1.8 2004/07/06 13:53:26 kappa Exp $
 
 use Test::NoWarnings;
-use Test::More tests => 100;
+use Test::More tests => 134;
 
 BEGIN { use_ok('IMAP::BodyStructure'); }
 
 my %nstrings = (
-    '"aaaa" '	=> ['aaaa', 6],
-    'NIL '	=> [undef, 3],
-    '  "QNIL"'	=> ['QNIL', 8],
-    ' "ka\\\\ppa" '=> ['ka\ppa', 10],
-    ' "a \"bb\" a" '=> ['a "bb" a', 13],
-    "{4}\r\nLNIL"=> ['LNIL', 9],
-    'AA'	=> ['AA', 2],
-    "{33000}\r\n" . ('@' x 33000) => ['@' x 33000, 33000 + 9],
+    '"aaaa" '	    =>  ['aaaa', 6],
+    'NIL '	    =>  [undef, 3],
+    '  "QNIL"'	    =>  ['QNIL', 8],
+    ' "ka\\\\ppa" ' =>  ['ka\ppa', 10],
+    ' "a \"bb\" a" '=>  ['a "bb" a', 13],
+    "{4}\r\nLNIL"   =>  ['LNIL', 9],
+    'AA'	    =>  ['AA', 2],
+    "{33000}\r\n" 
+     . ('@' x 33000)=>  ['@' x 33000, 33000 + 9],
+    '"\\\\"'        =>  ['\\', 4],
+    '"\\\\" "'      =>  ['\\', 4],
 );
 
 while (my ($nstr, $data) = each (%nstrings)) {
@@ -40,6 +43,13 @@ $bs = IMAP::BodyStructure->new('("text" "plain" ("cool" "\"yeah\"") "cont\\\\id"
 is($bs->{params}->{cool}, '"yeah"', 'non-NIL body params');
 is($bs->{cid}, 'cont\\id', 'non-NIL body id');
 is($bs->{desc}, 'Really cool message', 'non-NIL body desc');
+
+isa_ok($bs->part_at('1'), 'IMAP::BodyStructure');
+is($bs->part_at('1')->type, 'text/plain', 'simple part_at access 1');
+isa_ok($bs->part_at(''), 'IMAP::BodyStructure');
+is($bs->part_at('')->type, 'text/plain', 'simple part_at access 2');
+
+ok(!defined $bs->part_at('1.u1'), 'no UU-parts work in this module at all');
 
 $bs = IMAP::BodyStructure->new('("text" "plain" ("charset" "utf-8") NIL NIL "8bit" 75 4 NIL ("inline" ("filename" "tolower")) NIL)');
 is($bs->{params}->{charset}, 'utf-8', 'body charset');
@@ -113,7 +123,18 @@ is($bs->parts(1), $bs->part_at('2'), 'part_path 2 1/2');
 is($bs->parts(1)->{bodystructure}, $bs->part_at('2.TEXT'), 'part_path 3 - 1/4');
 is($bs->parts(1)->{bodystructure}->parts(0), $bs->part_at('2.1'), 'part_path 3');
 
+ok(!defined $bs->part_at('4'), 'wrong 1st level part');
+ok(!defined $bs->part_at('4.3'), 'wrong 1st level part (deep 1)');
+ok(!defined $bs->part_at('4.3.4'), 'wrong 1st level part (deep 2)');
+ok(!defined $bs->part_at('2.666'), 'wrong 2nd level part');
+ok(!defined $bs->part_at('2.666.1'), 'wrong 2nd level part (deep 1)');
+ok(!defined $bs->part_at('2.666.TEXT'), 'wrong 2nd level part (deep 1 TEXT)');
+ok(!defined $bs->part_at('2.1.33'), 'wrong 3rd level part');
+ok(!defined $bs->part_at('2.1.33.1'), 'wrong 3rd level part (deep 1)');
+
 ok($bs = IMAP::BodyStructure->new('(("text" "plain" ("charset" "KOI8-R") NIL NIL "8bit" 41 4 NIL ("inline" NIL) NIL)("message" "rfc822" NIL NIL NIL "8bit" 7140 (NIL "A postcard for you" (("Mail Delivery System" NIL "MAILER-DAEMON" "capella.rambler.ru")) (("Mail Delivery System" NIL "MAILER-DAEMON" "capella.rambler.ru")) (("Mail Delivery System" NIL "MAILER-DAEMON" "capella.rambler.ru")) ((NIL NIL "noone" "")) NIL NIL NIL NIL) ("message" "rfc822" ("name" "nice.name") NIL NIL "8bit" 269 (NIL "Part 5 of the outer message is itself an RFC822 message!" NIL NIL NIL NIL NIL NIL NIL NIL) ("text" "plain" ("charset" "ISO-8859-1") NIL NIL "quoted-printable" 58 1 NIL NIL NIL) 8 NIL NIL NIL) 139 NIL ("inline" NIL) NIL) "mixed" ("boundary" "SUOF0GtieIMvvwua") ("inline" NIL) NIL)'), 'm/r inside single-part m/r (extra artificial hierarchy level)');
+
+isa_ok($bs->part_at('2.1'), 'IMAP::BodyStructure');
 
 is($bs->{parts}->[1]->{part_id}, '2', 'obvious');
 is($bs->{parts}->[1]->{type}, 'message/rfc822', 'm/r type');
@@ -127,6 +148,20 @@ is($bs->{parts}->[1]->{bodystructure}->{bodystructure}->{type}, 'text/plain',
 is($bs->{parts}->[1]->{bodystructure}->{bodystructure},
     $bs->part_at('2.1'), 'part_at on m/r inside m/r');
 
+is($bs->part_at(''), $bs);
+is($bs->part_at('1')->type, 'text/plain');
+is($bs->part_at('1'), $bs->{parts}->[0]);
+is($bs->part_at('2')->type, 'message/rfc822');
+is($bs->part_at('2')->size, 7140);
+is($bs->part_at('2'), $bs->{parts}->[1]);
+is($bs->part_at('2.TEXT')->type, 'message/rfc822');
+is($bs->part_at('2.TEXT')->size, 269);
+is($bs->part_at('2.TEXT'), $bs->{parts}->[1]->{bodystructure});
+is($bs->part_at('2.1')->type, 'text/plain', 'dive into TWO nested m/r for type');
+is($bs->part_at('2.1')->size, 58, '... for size');
+is($bs->part_at('2.1'), $bs->{parts}->[1]->{bodystructure}->{bodystructure}, '... ref compare to direct access');
+
+ok(!defined $bs->part_at('2.2'), 'only 1 part inside message/rfc822');
 
 ok($bs = IMAP::BodyStructure->new(qq|(("text" "plain" ("charset" "KOI8-R") NIL NIL "8bit" 265 7 NIL NIL NIL)("application" "msword" ("name" {16}\r\nНа мне штаны.doc) NIL NIL "base64" 30130 NIL ("attachment" ("filename" {16}\r\nНа мне штаны.doc)) NIL) "mixed" ("boundary" "----yhZZhMGe-nrBcxM6r3syK6tCK:1045583399") NIL NIL)|), 'parse body with unencoded literal filenames');
 is($bs->parts(1)->filename, 'На мне штаны.doc', 'filename');
@@ -136,3 +171,7 @@ is($bs->parts(1)->filename, 'На мне штаны.doc', 'filename');
 
 ok($bs = IMAP::BodyStructure->new(qq|("message" "rfc822" ("name" "nice.name") NIL NIL "8bit" 269 ("Tue, 18 May 2004 15:33:05 +0400" {94}\r\n[ura\@antar.bryansk.ru: =?koi8-r?B?7sUgyM/E?=\t=?koi8-r?B?ydTFLCDExcbGy8ksIMsg5sTV3tUuLi4=?= :)] (("Alexander M. Pravking" NIL "fduch" "antar.bryansk.ru")) (("Alexander M. Pravking" NIL "fduch" "dyatel.antar.bryansk.ru")) (("Alexander M. Pravking" NIL "fduch" "antar.bryansk.ru")) (("Alex Kapranoff" NIL "alex" "kapranoff.ru")) NIL NIL NIL "<20040518113305.GB39041\@dyatel.antar.bryansk.ru>") ("text" "plain" ("charset" "ISO-8859-1") NIL NIL "quoted-printable" 58 1 NIL NIL NIL) 8 NIL NIL NIL)|), 'parse message/rfc822');
 ok($bs->{envelope}->{from}, 'literal with ")" inside'); 
+
+ok($bs = IMAP::BodyStructure->new(q|(("text" "plain" ("charset" "koi-8") NIL NIL "7bit" 324 15 NIL NIL NIL)("application" "octet-stream" ("name" "sms_name.zip") NIL NIL "base64" 384 NIL ("attachment" ("filename" "sms_name.zip")) NIL) "mixed" ("boundary" "------------F3493D6EC57AF05DFDF58977") NIL NIL)|), 'paragon mail that failed');
+is($bs->parts(0)->type, 'text/plain', '1st part type');
+is($bs->parts(1)->type, 'application/octet-stream', '2nd part type');

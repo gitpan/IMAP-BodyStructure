@@ -1,8 +1,7 @@
 package IMAP::BodyStructure;
 use strict;
 
-# $from-Id: BodyStructure.pm,v 1.23 2004/07/06 13:53:24 kappa Exp $
-# $Id: BodyStructure.pm,v 1.11 2005/11/16 14:21:06 kappa Exp $
+# $Id: BodyStructure.pm,v 1.17 2006/05/02 16:56:36 kappa Exp $
 
 =head1 NAME
 
@@ -55,7 +54,7 @@ use 5.005;
 
 use vars qw/$VERSION/;
 
-$VERSION = '0.96';
+$VERSION = '1.01';
 
 sub _get_envelope($\$);
 sub _get_bodystructure(\$;$$);
@@ -104,8 +103,8 @@ Returns the MIME encoding of the part. This is usually one of '7bit',
 =item size()
 
 Returns the size of the part in octets. It is I<NOT> the size of the
-data in the part, which may be very well quoted-printable encoded
-leaving us without a method of calculating the exact size of original
+data in the part, which may be encoded as quoted-printable leaving us
+without an obvious method of calculating the exact size of original
 data.
 
 =cut
@@ -127,7 +126,7 @@ if it's 'attachment'. And use case-insensitive comparisons.
 sub disp {
     my $self = shift;
 
-    return $self->{disp} ? $self->{disp}->[0] : 'inline';
+    return $self->{disp} ? $self->{disp}->[0] || 'inline' : 'inline';
 }
 
 =item charset()
@@ -146,7 +145,8 @@ sub charset {
 
     # get charset from params OR dive into the first part
     return $self->{params}->{charset}
-        || ($self->{parts} && @{$self->{parts}} && $self->{parts}->[0]->charset);
+        || ($self->{parts} && @{$self->{parts}} && $self->{parts}->[0]->charset)
+        || undef;   # please oh please, no '' or '0' charsets
 }
 
 =item filename()
@@ -254,19 +254,33 @@ sub part_at {
 sub _part_at {
     my $self = shift;
     my @parts = @_;
-    
-    my $part_num = shift @parts
-        or return $self;
+
+    return $self unless @parts; # (cond ((null? l) s)
+
+    my $part_num = shift @parts; # (car l)
 
     if ($self->type =~ /^multipart\//) {
-        # XXX assert: $part_num is a num
-        return $self->{parts}->[$part_num - 1]->_part_at(@parts);
+        if (exists $self->{parts}->[$part_num - 1]) {
+            return $self->{parts}->[$part_num - 1]->_part_at(@parts);
+        } else {
+            return;
+        }
     } elsif ($self->type eq 'message/rfc822') {
         return $self->{bodystructure} if $part_num eq 'TEXT';
 
-        return $self->{bodystructure}->_part_at($part_num, @parts);
+        if ($self->{bodystructure}->type =~ m{^ multipart/ | ^ message/rfc822 \z}xms) {
+            return $self->{bodystructure}->_part_at($part_num, @parts);
+        } else {
+            return $part_num == 1 ? $self->{bodystructure}->_part_at(@parts) : undef;
+        }
     } else {
-        return $self;
+        # there's no included parts in single non-rfc822 parts
+        # so if you still want one you get undef
+        if ($part_num && $part_num ne '1' || @parts) {
+            return;
+        } else {
+            return $self;
+        }
     }
 }
 
@@ -333,11 +347,11 @@ sub _get_bodystructure(\$;$$) {
 
     my $id_prefix = $id ? "$id." : '';
 
-    $$str =~ m/\G\s*(?:\(BODYSTRUCTURE)?\s*\(/gc
+    $$str =~ m/\G\s*(?:\(BODYSTRUCTURE\s*)?\(/gc
         or return 0;
 
     $bs->{parts}      = [];
-    if ($$str =~ /(?=\()\G/gc) {
+    if ($$str =~ /\G(?=\()/gc) {
         # multipart
         $bs->{type}       = 'multipart/';
         my $part_id = 1;
@@ -426,7 +440,7 @@ sub _get_npairs(\$) {
 }
 
 sub _get_nstring(\$) {
-    my $str = shift;
+    my $str = $_[0];
 
     # nstring         = string / nil
     # nil             = "NIL"
@@ -444,7 +458,7 @@ sub _get_nstring(\$) {
 
     if ($$str =~ /\GNIL/gc) {
         return undef;
-    } elsif ($$str =~ m/\G(\"(?:\\\"|(?!\").)*\")/gc) { # delimited re ala Friedl
+    } elsif ($$str =~ m/\G(\"(?>[^\\\"]*(?:\\.[^\\\"]*)*)\")/gc) { # delimited re ala Regexp::Common::delimited + (?>...)
         return _unescape($1);
     } elsif ($$str =~ /\G\{(\d+)\}\r\n/gc) {
         my $pos = pos($$str);
@@ -614,12 +628,7 @@ sub _get_naddress(\$) {
                 ? "$addr{account}@" . ($addr{host} || '')
                 : '');
 
-        if ($addr{address} xor $addr{name}) {
-            $addr{full} = $addr{name} || $addr{address};
-        } else {
-            # if both exist or are empty
-            $addr{full} = $addr{address} ? "$addr{name} <$addr{address}>" : '';
-        }
+        $addr{full} = _format_address($addr{name}, $addr{address});
 
         $$str =~ m/\G\s*\)/gc;
         return \%addr;
@@ -644,6 +653,30 @@ sub _get_naddrlist(\$) {
         return \@addrs;
     }
     return 0;
+}
+
+my $rfc2822_atext = q(a-zA-Z0-9!#$%&'*+/=?^_`{|}~-);   # simple non-interpolating string (think apostrophs)
+my $rfc2822_atom = qr/[$rfc2822_atext]+/; # straight from rfc2822
+
+use constant EMPTY_STR => q{};
+sub _format_address {
+    my ($phrase, $email) = @_;
+
+    if (defined $phrase && $phrase ne EMPTY_STR) {
+        if ($phrase !~ /^ \s* " [^"]+ " \s* \z/xms) {
+            # $phrase is not already quoted
+
+            $phrase =~ s/ (["\\]) /\\$1/xmsg;
+
+            if ($phrase !~ m/^ \s* $rfc2822_atom (?: \s+ $rfc2822_atom)* \s* \z/xms) {
+                $phrase = qq{"$phrase"};
+            }
+        }
+
+        return $email ? "$phrase <$email>" : $phrase;
+    } else {
+        return $email || '';
+    }
 }
 
 1;
